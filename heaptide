@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 AMARBARO · amarbaro.org labs
+# heaptide run [--gpu] [--py] [--py-depth N] [--every MS] [--snapshot-every S] [--gpu-timeline all|sites,streams,frag]
+#              [--no-children | --only NAME[,NAME]] [--out DIR] -- CMD...
+# heaptide report DIR [args]  (--supp FILE, --no-default-supp: report/default.supp drops the ROCm runtime's one-time allocations)   |   heaptide snapshot DIR [--label NAME] (every running process writes a report now; NAME keeps them in DIR/NAME)
+# heaptide attach PID [--out DIR]   (a running process: gdb loads heaptide into it; root under Yama 1)
+# heaptide detach DIR   (a last snapshot, then the process runs on untracked: no restart)
+# heaptide flame DIR [-o OUT.html] [--open]   (an interactive flame graph, one offline HTML file)
+# heaptide diff BASE_DIR NEW_DIR [--fail-on new|grown|none] [--json] [--top N]   (exit 1: a new leak site)
+set -euo pipefail
+here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+# recover DIR: a traced process killed by SIGKILL or the OOM killer (or gone through _exit) left its tables
+# in /dev/shm; write its report into DIR now. Called after a run and by report, for when the kill took the
+# wrapper too (systemd stops a whole unit on OOM)
+recover() {
+  local f out; out=$(readlink -f "$1")
+  for f in /dev/shm/heaptide."$(id -u)".*; do
+    [[ -f $f ]] && ! kill -0 "${f##*.}" 2>/dev/null && head -c 8192 "$f" | grep -qaF -- "$out" || continue
+    HEAPTIDE_POSTMORTEM=$f LD_PRELOAD="$here/build/libheaptide.so" /usr/bin/true || echo "heaptide: FAIL post-mortem report from $f" >&2
+    rm -f "$f"
+  done
+}
+case "${1:-}" in
+  report) shift; [[ -d ${1:-} ]] && recover "$1"; HEAPTIDE_DEFAULT_SUPP=${HEAPTIDE_DEFAULT_SUPP:-$here/report/default.supp} exec "$here/build/heaptide_report" "$@" ;;
+  snapshot) [[ -d ${2:-} && ( -z ${3:-} || ( $3 == --label && ${4:-} =~ ^[A-Za-z0-9._-]+$ ) ) ]] ||
+              { echo "FAIL heaptide: snapshot DIR [--label NAME]   (DIR: the run's --out; NAME: letters, digits, . _ -)" >&2; exit 2; }
+            # every traced process answers the new mtime; this returns once the root's report (any, if the
+            # root is gone) is newer than the request. --label NAME keeps this state in DIR/NAME (hard links)
+            s=$2/snapshot; touch "$s"; r=$(cat "$2/root" 2>/dev/null || true); [[ -n $r && -d /proc/$r ]] || r='*'
+            for _ in $(seq 600); do
+              [[ -n $(find "$2" -maxdepth 1 -name "heaptide.$r.bin" -newer "$s" -print -quit) ]] || { sleep 0.1; continue; }
+              if [[ -n ${4:-} ]]; then shopt -s nullglob; f=("$2"/heaptide.*.bin "$2"/py.*.txt "$2"/pyheld.*.txt); mkdir -p "$2/$4"; ln -f "${f[@]}" "$2/$4/"; fi
+              echo "heaptide: snapshot written to $2${4:+ and kept in $2/$4}" >&2; exit 0
+            done
+            echo "FAIL heaptide: no report in $2 within 60 s (process gone, or the snapshot was skipped: see its stderr)" >&2; exit 1 ;;
+  detach) [[ -d ${2:-} ]] || { echo "FAIL heaptide: detach needs the attach (or run) --out DIR" >&2; exit 2; }
+          rc=0; "$here/heaptide" snapshot "$2" || rc=1
+          : > "$2/detach"  # the process removes it once detached
+          for _ in $(seq 100); do [[ -e $2/detach ]] || { echo "heaptide: detached; the process runs on untracked" >&2; exit $rc; }; sleep 0.1; done
+          rm -f "$2/detach"; echo "FAIL heaptide: not detached within 10 s (process gone?)" >&2; exit 1 ;;
+  flame) use="FAIL heaptide: flame DIR [-o OUT.html] [--open]"; [[ -d ${2:-} ]] || { echo "$use" >&2; exit 2; }
+         dir=$2; o=$2/flame.html; op=0; shift 2
+         while (( $# )); do case $1 in -o) o=${2:?$use}; shift ;; --open) op=1 ;; *) echo "$use" >&2; exit 2 ;; esac; shift; done
+         d=$(mktemp "${TMPDIR:-/tmp}/heaptide-flame.XXXXXX"); trap 'rm -f "$d"' EXIT
+         "$here/build/heaptide_report" "$dir" --flame-data > "$d" || exit 2
+         sed -i 's#</#<\\/#g' "$d"  # inside a <script> block "</script" must not appear
+         awk -v d="$d" '{ i = index($0, "/*HEAPTIDE_DATA*/"); if (!i) { print; next }
+           printf "%s", substr($0, 1, i - 1); while ((getline l < d) > 0) printf "%s", l; print substr($0, i + 17) }' "$here/report/flame.html" > "$o"
+         echo "heaptide: flame graph written to $o ($(( $(stat -c %s "$o") / 1024 )) KiB)" >&2
+         (( op )) && setsid xdg-open "$o" > /dev/null 2>&1 < /dev/null &
+         exit 0 ;;
+  diff) [[ -d ${2:-} && -d ${3:-} ]] || { echo "FAIL heaptide: diff needs two report DIRs" >&2; exit 2; }
+        t=$(mktemp -d "${TMPDIR:-/tmp}/heaptide-diff.XXXXXX"); trap 'rm -rf "$t"' EXIT; top=()
+        for ((i = 4; i <= $#; i++)); do v=$((i + 1)); v=${!v:-}
+          case ${!i} in --json) ;;
+            --fail-on) [[ $v =~ ^(new|grown|none)$ ]] || { echo "FAIL heaptide: --fail-on takes new|grown|none" >&2; exit 2; }; ((i++)) ;;
+            --top) [[ $v =~ ^[0-9]+$ ]] || { echo "FAIL heaptide: --top takes a number" >&2; exit 2; }; top=(--top "$v"); ((i++)) ;;
+            *) echo "FAIL heaptide: unknown diff option ${!i}" >&2; exit 2 ;;
+          esac; done
+        for x in 2 3; do "$here/build/heaptide_report" "${!x}" --fail-on none "${top[@]}" --sites "$t/$x" >/dev/null || exit 2; done
+        "$here/build/heaptide_report" --diff "$t/2" "$t/3" "${@:4}"; exit $? ;;
+  attach) [[ ${2:-} =~ ^[0-9]+$ ]] || { echo "FAIL heaptide: attach PID [--out DIR]" >&2; exit 2; }
+          out=${4:-.work/heaptide}; [[ ${3:-} == --out || -z ${3:-} ]] || { echo "FAIL heaptide: attach PID [--out DIR]" >&2; exit 2; }
+          ! grep -q libheaptide "/proc/$2/maps" 2>/dev/null || { echo "FAIL heaptide: $2 has heaptide loaded already (attached, or inert after detach: dlopen would return that copy and hook nothing); restart it to attach again" >&2; exit 2; }
+          mkdir -p "$out"; o=$(readlink -f "$out")
+          (( EUID )) || chown "$(stat -c %u:%g "/proc/$2")" "$o"  # under sudo: the target writes its report here
+          r=$(gdb -p "$2" -batch -nx -ex "call (int)setenv(\"HEAPTIDE_OUT\",\"$o\",1)" -ex 'call (int)setenv("HEAPTIDE_ATTACH","1",1)' \
+                -ex "call (void*)dlopen(\"$here/build/libheaptide.so\",2)" 2>&1) || true
+          grep -q '^\$3 = (void \*) 0x[1-9a-f]' <<<"$r" || { echo "FAIL heaptide: attach to $2 failed (Yama ptrace_scope $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo ?): run it with sudo, or as the process's parent)" >&2
+            grep -iE 'ptrace|denied|error|No symbol' <<<"$r" | head -3 >&2; exit 2; }
+          echo "heaptide: attached to $2; heaptide snapshot $o, or the report at its exit" >&2; exit 0 ;;
+  run) shift ;;
+  *) echo "usage: heaptide run [--gpu] [--py] [--py-depth N] [--every MS] [--snapshot-every S] [--gpu-timeline PARTS] [--no-children | --only NAME[,NAME]] [--out DIR] -- CMD... | heaptide report DIR [--json] [--top N] | heaptide snapshot DIR [--label NAME] | heaptide diff BASE NEW [--fail-on new|grown|none] | heaptide attach PID [--out DIR] | heaptide detach DIR | heaptide flame DIR [-o OUT.html] [--open]" >&2; exit 2 ;;
+esac
+out=.work/heaptide; py=0; pyd=1
+while [[ $# -gt 0 && $1 != -- ]]; do
+  case $1 in --py-depth|--every|--snapshot-every|--out|--gpu-timeline|--only)
+    [[ $# -ge 2 && $2 != -- && $2 != --* ]] || { echo "FAIL heaptide: $1 needs a value" >&2; exit 2; }
+    [[ $1 == --out || $1 == --gpu-timeline || $1 == --only || $2 =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "FAIL heaptide: $1 takes a number, not $2" >&2; exit 2; } ;;
+  esac
+  case $1 in
+    # pooling allocators hand many buffers out of one device allocation: Mojo's and PyTorch's are off, so
+    # each buffer (tensor) is its own block with its own site
+    --gpu) export MODULAR_DEVICE_CONTEXT_MEMORY_MANAGER_SIZE=0 MODULAR_DEVICE_CONTEXT_HOST_MEMORY_MANAGER_SIZE=0 \
+                  PYTORCH_NO_CUDA_MEMORY_CACHING=1 PYTORCH_NO_HIP_MEMORY_CACHING=1 ;;
+    --py) py=1 ;;
+    --py-depth) pyd=$2; shift ;;
+    --every) export HEAPTIDE_EVERY=$2; shift ;;
+    --snapshot-every) export HEAPTIDE_SNAPSHOT_EVERY=$2; shift ;;
+    --out) out=$2; shift ;;
+    --no-children) export HEAPTIDE_NOCHILD=1 ;;  # only the command itself is traced
+    --only) export HEAPTIDE_ONLY=$2; shift ;;  # only processes with these names (argv[0] basename)
+    --gpu-timeline) m=0; for x in ${2//,/ }; do case $x in all) m=7;; sites) m=$((m | 1));; streams) m=$((m | 3));; frag) m=$((m | 5));;
+                      *) echo "FAIL heaptide: --gpu-timeline takes all or sites,streams,frag, not $x" >&2; exit 2;; esac; done
+                    export HEAPTIDE_GPU_TIMELINE=$m; shift ;;
+    *) echo "FAIL heaptide: unknown option $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+[[ ${1:-} == -- ]] && shift
+[[ $# -gt 0 ]] || { echo "FAIL heaptide: no command" >&2; exit 2; }
+mkdir -p "$out"; export HEAPTIDE_OUT=$(readlink -f "$out"); unset HEAPTIDE_ROOT
+# a reused DIR: an earlier run's files would join this run's report; other files stay
+rm -f "$out/root" "$out"/heaptide.*.bin "$out"/py.*.txt "$out"/pyheld.*.txt
+if (( py )); then
+  export HEAPTIDE_PY=1
+  [[ $(basename "$1") == python* ]] || { echo "FAIL heaptide: --py needs a python command" >&2; exit 2; }
+  export HEAPTIDE_DEPTH=${HEAPTIDE_DEPTH:-8} HEAPTIDE_PY_DEPTH=$pyd  # the Python lines come from the shim's hooks; native frames past 8 only split sites
+  perf=(); "$1" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null && perf=(-X perf)  # Python frames in native stacks
+  exe=$1; shift; opt=()  # interpreter options (-u, -X dev, -W x) stay before the runner
+  while [[ $# -gt 0 && $1 == -?* && $1 != -c && $1 != -m && $1 != -- ]]; do
+    if [[ $1 == -[WX] && $# -ge 2 ]]; then opt+=("$1" "$2"); shift 2; else opt+=("$1"); shift; fi
+  done
+  [[ ${1:-} == -- ]] && shift
+  set -- "$exe" "${perf[@]}" "${opt[@]}" "$here/py/run.py" "$@"
+fi
+# static ASan (clang's default) defines malloc in the program itself, ahead of any preload
+exe=$(command -v "$1" || true)
+[[ -n $exe ]] && command -v nm >/dev/null && nm -D --defined-only "$exe" 2>/dev/null | grep -c ' __asan_init$' >/dev/null &&
+  echo "heaptide: warning: $1 links ASan statically, heaptide cannot see its allocations; rebuild with -shared-libsan (clang) or gcc -fsanitize=address" >&2
+# an ASan-built program refuses to start unless its runtime is preloaded first; heaptide must be,
+# and its hooks hand every call on to ASan's, so the order check is turned off (both then work)
+[[ ${ASAN_OPTIONS:-} == *verify_asan_link_order* ]] || export ASAN_OPTIONS="${ASAN_OPTIONS:+${ASAN_OPTIONS}:}verify_asan_link_order=0"
+rc=0; LD_PRELOAD="$here/build/libheaptide.so${LD_PRELOAD:+:$LD_PRELOAD}" "$@" || rc=$?
+recover "$HEAPTIDE_OUT"
+echo "heaptide: report with: heaptide report $HEAPTIDE_OUT" >&2
+exit $rc
