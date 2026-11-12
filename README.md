@@ -19,7 +19,7 @@ heaptide diff BASE NEW [--fail-on new|grown|none] [--json] [--top N]   exit 1 on
 heaptide attach PID [--out DIR]                        a running process, no restart (gdb; sudo under Yama 1)
 heaptide detach DIR                                    a last snapshot, then the process runs on untracked
 heaptide flame DIR [-o OUT.html] [--open]              every call path as an interactive flame graph, one offline page
-heaptide report DIR [--json] [--top N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none]
+heaptide report DIR [--json] [--top N] [--per N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none]
                     [--growth-limit MIB] [--folded leaked|live|peak|allocated|temporaries]
 ```
 

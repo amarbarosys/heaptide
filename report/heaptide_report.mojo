@@ -760,6 +760,7 @@ def main() raises:
     var dir = String(args[1])
     var as_json = False
     var n_top = 10
+    var per = 0  # --per N: HOTSPOTS / TEMPORARIES counts also per unit of work (N batches, launches, requests)
     var fail_on = String("any")
     var limit = 0.0  # --growth-limit, bytes; 0 = relative rule only
     var sites_out = String()  # --sites FILE: one line per site, for diff
@@ -781,7 +782,7 @@ def main() raises:
             flame_data = flame_data or flag == "--flame-data"
             i += 1
             continue
-        if flag not in ["--top", "--growth-limit", "--fail-on", "--supp", "--sites", "--folded"]:
+        if flag not in ["--top", "--per", "--growth-limit", "--fail-on", "--supp", "--sites", "--folded"]:
             print("FAIL report: unknown option", flag, file=stderr)
             exit(2)
         if i + 1 >= len(args):
@@ -789,7 +790,11 @@ def main() raises:
             exit(2)
         var v = String(args[i + 1])
         try:
-            if flag == "--top":
+            if flag == "--per":
+                per = Int(v)
+                if per < 1:
+                    raise Error()
+            elif flag == "--top":
                 n_top = Int(v)
                 if n_top < 1:
                     raise Error()
@@ -1146,7 +1151,10 @@ def main() raises:
         for s in range(3):
             print(names[s])
             for w in sections[s + 1]:
-                print("  ", field(stacks[w], s + 1), " ", kind_name(stacks[w].kind), "  ", sites.get(w, String("?")))
+                var unit = String()
+                if per > 0 and s > 0:
+                    unit = "  (" + String(Float64(Int(Float64(field(stacks[w], s + 1)) / Float64(per) * 10.0)) / 10.0) + " per unit)"
+                print("  ", field(stacks[w], s + 1), " ", kind_name(stacks[w].kind), "  ", sites.get(w, String("?")) + unit)
                 var c = chain(held, w)
                 if s == 0 and len(c) > 0:
                     print("      held by:", held_by(c, sites, roots))
