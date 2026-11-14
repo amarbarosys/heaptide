@@ -86,8 +86,8 @@ The release tarball needs no Mojo: Linux x86-64, glibc 2.34 or newer, and `libun
 (`libunwind8` on Debian/Ubuntu, `libunwind` on Arch/Fedora).
 
 ```
-curl -LO https://github.com/amarbarosys/heaptide/releases/download/v1.0.0/heaptide-v1.0.0-linux-x86_64.tar.gz
-tar xzf heaptide-v1.0.0-linux-x86_64.tar.gz && cd heaptide-v1.0.0-linux-x86_64 && ./heaptide run -- CMD...
+curl -LO https://github.com/amarbarosys/heaptide/releases/download/v1.0.1/heaptide-v1.0.1-linux-x86_64.tar.gz
+tar xzf heaptide-v1.0.1-linux-x86_64.tar.gz && cd heaptide-v1.0.1-linux-x86_64 && ./heaptide run -- CMD...
 ```
 
 ## Build from source
