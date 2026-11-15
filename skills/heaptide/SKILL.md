@@ -61,6 +61,14 @@ script). Set `HEAPTIDE=` to point elsewhere. Full flag list: [docs/api.md](../..
 - heaptide does not queue GPU jobs: do not start a second one on a busy GPU.
 - Never attach to a browser in use; attached runs under-report by at most the `before attach:` bytes.
 
+## In mojo-baro (standard since 2026-11-15)
+
+Any engine, server or tool change that can hold memory longer (KV pool, checkpoints, packs, expert tier, MCP, front)
+gets one `heaptide run --gpu -- <engine or baro-serve command>` on the smallest real request, `heaptide report` for
+host RSS and HIP device/pinned bytes by call site, and `heaptide diff BASE NEW --fail-on new` against the parent
+commit's run. Numbers go in the commit body (memory-optimization contract). The engine pools Mojo buffers: without
+`--gpu` the report shows one block.
+
 ## Gate
 
 `tests/run.sh --cpu` runs the checks that need no GPU (needs the build above). Exit 0 means all pass.
