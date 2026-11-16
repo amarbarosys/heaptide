@@ -19,6 +19,7 @@ mv "$tmp" "$here/build/heaptide_report"
 echo "built $here/build/heaptide_report"
 # the --gui window: imkit from the sibling checkout (IMKIT= overrides)
 imkit=${IMKIT:-$here/../../mojo/mojo-imkit}
+if [[ ! -d $imkit/src/imkit ]]; then echo "skip heaptide_gui: no mojo-imkit at $imkit (set IMKIT=); --gui unavailable" >&2; exit 0; fi
 tmp=$here/build/.heaptide_gui.new; rm -f "$tmp"; rc=0
 log=$("$mojo" build -I "$imkit/src" "$here/report/gui.mojo" -o "$tmp" 2>&1) || rc=$?
 grep -vE "posix_spawn|Crashpad|spawn_subprocess|Please submit|Stack dump|Program arguments|^ *#|^[0-9]+ +[^ ]+ +0x|^\s*$" <<<"$log" >&2 || true
