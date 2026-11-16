@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 AMARBARO · amarbaro.org labs
-# heaptide report DIR [--json] [--top N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none] [--growth-limit MIB]
+# heaptide report DIR [--json] [--top N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none] [--growth-limit MIB] [--kernels CSV]
 # Reads DIR/heaptide.<pid>.{bin,maps} (+ py.<pid>.txt), symbolizes the reported stacks in one
-# llvm-symbolizer batch, prints LEAKS / GROWTH / PEAK / HOTSPOTS / TEMPORARIES / PYTHON.
+# llvm-symbolizer batch, prints LEAKS / GROWTH / PEAK / HOTSPOTS / TEMPORARIES / PYTHON, and with a GPU timeline
+# GPU SCRATCH (the exe's AMDGPU code objects by llvm-readobj; --kernels = a rocprofv3 kernel_trace.csv keeps the dispatched ones).
 # Exit 0 clean, 1 leak or growth (per --fail-on), 2 tool error.
 from std.sys import argv, exit, stderr
 from std.os import listdir, getenv
@@ -237,12 +238,14 @@ struct Frame(Copyable, Movable):
     var loc: String  # file:line:col from the symbolizer, "??..." when unknown
     var user: Bool  # the user's own code: own source file, own executable, a Python function
     var shown: Bool  # False: libheaptide's own frame, or an address in no mapping
+    var inl: String  # functions inlined into this one at the address, innermost first, "func file:line <- ..."
 
     def text(self) -> String:
-        if self.loc.startswith("??"):
+        if self.loc.startswith("??") or self.loc.endswith(":0:0"):  # ":0:0": a Mojo binary built without -g names functions, no lines
             return self.func
         var slash = self.loc.rfind("/")
-        return String(self.func, " ", String(self.loc[byte=slash + 1 :]) if slash >= 0 else self.loc)
+        var t = String(self.func, " ", String(self.loc[byte=slash + 1 :]) if slash >= 0 else self.loc)
+        return t if self.inl.byte_length() == 0 else String(t, " (inlined: ", self.inl, ")")
 
 
 def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], dir: String, pid: String, mut root_names: List[String]) raises -> List[Frame]:
@@ -323,7 +326,7 @@ def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], 
     var outp = dir + "/.sym." + pid + ".out"
     with open(inp, "w") as f:
         f.write(req)
-    var cmd = String("I=", sq(inp), "\n", DEBUGINFOD, FIND_SYMBOLIZER, " --no-inlines < ", sq(inp), " > ", sq(outp), "\0")
+    var cmd = String("I=", sq(inp), "\n", DEBUGINFOD, FIND_SYMBOLIZER, " --inlines < ", sq(inp), " > ", sq(outp), "\0")
     var rc = external_call["system", Int32](cmd.unsafe_ptr())
     var text = String()
     if rc == 3 << 8:  # no symbolizer: sites name modules only
@@ -347,6 +350,27 @@ def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], 
         var func = String(lines[li]) if li < len(lines) else String("??")
         var loc = String(lines[li + 1]) if li + 1 < len(lines) else String("??:0")
         li += 2
+        # --inlines: more pairs follow while the next line is not blank, innermost first, each inlined into the next. The frame is the
+        # outermost one in the user's own source file (Mojo inlines the program's main into the C main of its startup: the outermost
+        # pair alone would name a library file), else the outermost; the inner ones are listed as inlined.
+        var pf = List[String]()
+        var pl = List[String]()
+        pf.append(func.copy())
+        pl.append(loc.copy())
+        while qi < nq and li + 1 < len(lines) and lines[li].byte_length() > 0:
+            pf.append(String(lines[li]))
+            pl.append(String(lines[li + 1]))
+            li += 2
+        var pick = len(pf) - 1
+        for k in range(len(pf)):
+            if pl[k].find(":") > 0 and user_file(String(pl[k][byte=: pl[k].find(":")])):
+                pick = k
+        var inl = String()
+        for k in range(pick):
+            var pn = String(pf[k][byte=: pf[k].find("(")]) if pf[k].find("::") >= 0 and pf[k].find("(") > 0 else pf[k].copy()
+            inl += (" <- " if inl.byte_length() > 0 else "") + pn + " " + String(pl[k][byte=pl[k].rfind("/") + 1 :])
+        func = pf[pick].copy()
+        loc = pl[pick].copy()
         if pys[qi].byte_length() > 0:
             func = pys[qi]
         elif func == "??":
@@ -360,11 +384,11 @@ def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], 
             root_names.append(String("global ", func, " (", mods[qi], ")") if not func.startswith("[") else func)
             continue
         # user frame: own source file, or (no debug info) a frame in the program's own executable
-        var user = (user_file(String(loc[byte=: loc.find(":")])) if loc.find(":") > 0 else False) or (loc.startswith("??") and mods[qi] == exe and not exe.startswith("python")) or (pys[qi].byte_length() > 0 and not func.startswith("[jit "))  # a static python: its frames are the interpreter
-        answers.append(Frame(func^, loc^, user, True))
+        var user = (user_file(String(loc[byte=: loc.find(":")])) if loc.find(":") > 0 else False) or (loc.startswith("??") and mods[qi] == exe and not exe.startswith("python")) or (loc.endswith(":0:0") and mods[qi] == exe and not (func.startswith("std::") or func.startswith("max::"))) or (pys[qi].byte_length() > 0 and not func.startswith("[jit "))  # a static python: its frames are the interpreter
+        answers.append(Frame(func^, loc^, user, True, inl^))
     var frames = List[Frame]()
     for a in at:
-        frames.append(answers[a].copy() if a >= 0 else Frame(String(), String("??"), False, False))
+        frames.append(answers[a].copy() if a >= 0 else Frame(String(), String("??"), False, False, String()))
     return frames^
 
 
@@ -740,6 +764,91 @@ def flame(stacks: List[Stack], maps: List[Mapping], b: List[UInt8], smp_at: Int,
     return o + ',"python":[' + ",".join(py) + "]}"
 
 
+# llvm-readobj next to the symbolizer's LLVM; exit 3 when none runs
+comptime FIND_READOBJ = "R=${HEAPTIDE_READOBJ:-$(command -v llvm-readobj || echo /opt/rocm/llvm/bin/llvm-readobj)}; [ -x \"$R\" ] || exit 3\n"
+
+
+def kfd_slots() -> Int:
+    # Scratch slots of one ROCr queue: AlignUp(CUs, shader engines) x max_slots_scratch_cu (amd_aql_queue.cpp, docs/scratch.md),
+    # from the KFD node with the most SIMDs (the dGPU); 0 when there is no KFD.
+    var best = 0
+    var slots = 0
+    try:
+        for nd in listdir("/sys/class/kfd/kfd/topology/nodes"):
+            var v = Dict[String, Int]()
+            with open("/sys/class/kfd/kfd/topology/nodes/" + nd + "/properties", "r") as f:
+                for l in f.read().split("\n"):
+                    var kv = l.split(" ")
+                    if len(kv) == 2:
+                        try:
+                            v[String(kv[0])] = Int(kv[1])
+                        except:
+                            pass
+            var engines = v.get("array_count", 0) // max(v.get("simd_arrays_per_engine", 1), 1)
+            var cus = v.get("array_count", 0) * v.get("cu_per_simd_array", 0)
+            if engines > 0 and v.get("simd_count", 0) > best:
+                best = v["simd_count"]
+                slots = (cus + engines - 1) // engines * engines * v.get("max_slots_scratch_cu", 0)
+    except:
+        pass
+    return slots
+
+
+def scratch_rows(exe: String, dir: String, pid: String, slots: Int, only: String) raises -> List[List[String]]:
+    # One row [kernel, private B per thread, bytes one queue reserves for it] per kernel of the AMDGPU code objects
+    # (ELF e_machine 224) embedded in exe, largest first. ROCr sizes a queue's scratch by its largest kernel, so the
+    # first row is the figure to compare with the device memory held beyond live blocks.
+    var b = List[UInt8]()
+    with open(exe, "r") as f:
+        b = f.read_bytes()
+    var img = dir + "/.co." + pid + ".elf"
+    var sh = String(FIND_READOBJ)
+    var at = 0
+    while at + 64 < len(b):
+        if b[at] == 0x7F and b[at + 1] == 0x45 and b[at + 2] == 0x4C and b[at + 3] == 0x46 and b[at + 4] == 2 and b[at + 18] == 224 and b[at + 19] == 0:
+            var size = Int(u64(b, at + 0x28)) + (Int(b[at + 0x3C]) | Int(b[at + 0x3D]) << 8) * (Int(b[at + 0x3A]) | Int(b[at + 0x3B]) << 8)
+            if size > 64 and at + size <= len(b):
+                sh += String("dd if=", sq(exe), " of=", sq(img), " bs=1M iflag=skip_bytes,count_bytes skip=", at, " count=", size, " status=none && \"$R\" --notes ", sq(img), "\n")
+                at += size
+                continue
+        at += 1
+    var rows = List[List[String]]()
+    if sh.byte_length() <= FIND_READOBJ.byte_length():
+        return rows^
+    var outp = dir + "/.co." + pid + ".txt"
+    var cmd = String("{ ", sh, "} > ", sq(outp), " 2>/dev/null; rc=$?; rm -f ", sq(img), "; exit $rc\0")
+    var rc = external_call["system", Int32](cmd.unsafe_ptr())
+    if rc == 3 << 8:
+        print("note: no llvm-readobj (install LLVM or set HEAPTIDE_READOBJ); no GPU SCRATCH table", file=stderr)
+        return rows^
+    var name = String()
+    var priv = 0
+    with open(outp, "r") as f:
+        for l in f.read().split("\n"):
+            var t = String(l.strip())
+            if t.startswith(".name:"):
+                name = String(t[byte=6:].strip())
+            elif t.startswith(".private_segment_fixed_size:"):
+                priv = Int(t[byte=28:].strip())
+            elif t.startswith(".wavefront_size:"):
+                var lanes = Int(t[byte=16:].strip())
+                var per = (priv + 256 // lanes - 1) // (256 // lanes) * (256 // lanes)  # per-thread size aligned like ROCr
+                var dup = False
+                for r in rows:
+                    dup = dup or r[0] == name
+                if only.byte_length() > 0 and only.find('"' + name + '"') < 0:  # --kernels: only what the trace dispatched
+                    dup = True
+                if not dup and priv > 0:
+                    rows.append([name, String(priv), String(per * lanes * slots)])
+    for i in range(len(rows)):  # largest first (a few hundred rows)
+        for j in range(i + 1, len(rows)):
+            if Int(rows[j][2]) > Int(rows[i][2]):
+                var tmp = rows[i].copy()
+                rows[i] = rows[j].copy()
+                rows[j] = tmp^
+    return rows^
+
+
 def main() raises:
     var args = argv()
     if len(args) >= 4 and String(args[1]) == "--diff":
@@ -755,7 +864,7 @@ def main() raises:
             exit(2)
         exit(diff(String(args[2]), String(args[3]), fo, js))
     if len(args) < 2:
-        print("usage: heaptide report DIR [--json] [--top N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none] [--growth-limit MIB]", file=stderr)
+        print("usage: heaptide report DIR [--json] [--top N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none] [--growth-limit MIB] [--kernels CSV]", file=stderr)
         exit(2)
     var dir = String(args[1])
     var as_json = False
@@ -764,6 +873,7 @@ def main() raises:
     var fail_on = String("any")
     var limit = 0.0  # --growth-limit, bytes; 0 = relative rule only
     var sites_out = String()  # --sites FILE: one line per site, for diff
+    var kernels_csv = String()  # --kernels FILE: a rocprofv3 kernel_trace.csv; GPU SCRATCH lists only the kernels it dispatched
     var flame_data = False  # --flame-data: the call tree as JSON, for heaptide flame
     var folded = -1  # --folded METRIC: "frame;frame;frame bytes" lines
     var flames = List[String]()
@@ -782,7 +892,7 @@ def main() raises:
             flame_data = flame_data or flag == "--flame-data"
             i += 1
             continue
-        if flag not in ["--top", "--per", "--growth-limit", "--fail-on", "--supp", "--sites", "--folded"]:
+        if flag not in ["--top", "--per", "--growth-limit", "--fail-on", "--supp", "--sites", "--folded", "--kernels"]:
             print("FAIL report: unknown option", flag, file=stderr)
             exit(2)
         if i + 1 >= len(args):
@@ -813,6 +923,9 @@ def main() raises:
                         folded = m
                 if folded < 0:
                     raise Error()
+            elif flag == "--kernels":
+                with open(v, "r") as f:
+                    kernels_csv = f.read()
             elif flag == "--fail-on":
                 fail_on = v
                 if fail_on not in ["any", "leaks", "growth", "none"]:
@@ -975,6 +1088,15 @@ def main() raises:
                     seen[Int(id) - 1] = True
                     wanted.append(Int(id) - 1)
             tl_peak[i] = max(tl_peak[i], v)
+        var sc_slots = 0  # GPU SCRATCH: only a run that has a GPU timeline reads the code objects of its exe
+        var sc = List[List[String]]()
+        var held_beyond: UInt64 = 0  # the most the device held beyond live blocks
+        if len(tl_ids) > 0 and len(maps) > 0:
+            sc_slots = kfd_slots()
+            sc = scratch_rows(exe, dir, pid, sc_slots, kernels_csv) if sc_slots > 0 else List[List[String]]()
+            for i in range(len(tl_ids)):
+                if tl_ids[i] == 0xFFFFFFFF:
+                    held_beyond = tl_peak[i]
         var py_held = List[List[String]]()  # --py: {kind py|gpu, Python site | stack id, holder chain}, from py/run.py
         try:
             with open(dir + "/pyheld." + pid + ".txt", "r") as f:
@@ -1099,7 +1221,13 @@ def main() raises:
                         json += String("" if firstp else ",", "[", t, ",", u64(b, tl_at + 16 + k * 16), "]")
                         firstp = False
                 json += "]}"
-            json += "]}"
+            json += "]"
+            if len(sc) > 0:  # largest kernel first; unexplained = held beyond live blocks - the largest (negative: scratch exceeds it)
+                json += String(',"gpu_scratch":{"slots":', sc_slots, ',"largest":', sc[0][2], ',"held":', held_beyond, ',"unexplained":', Int(held_beyond) - Int(sc[0][2]), ',"kernels":[')
+                for i in range(min(len(sc), 10)):
+                    json += String("," if i > 0 else "", '{"kernel":', jstr(sc[i][0]), ',"private":', sc[i][1], ',"bytes":', sc[i][2], "}")
+                json += "]}"
+            json += "}"
             continue
 
         var peak_sum: UInt64 = 0
@@ -1147,6 +1275,12 @@ def main() raises:
                 for c in tl_columns(b, tl_at, ntl, tl_ids[i], nsamp):
                     line += ramp[0 if c == 0 else max(1, Int(c * 9 // top_b))]
                 print("  ", human(tl_peak[i]), "  ", line, "  ", tl_name(tl_ids[i], stacks, sites))
+        if len(sc) > 0:
+            print("GPU SCRATCH (", String(exe[byte=exe.rfind("/") + 1 :]), "code objects", "dispatched per --kernels:" if kernels_csv.byte_length() > 0 else "of every integrator, an upper bound (--kernels FILE keeps the dispatched ones):", "a queue reserves its largest kernel's private bytes x wave size x", sc_slots, "slots)")
+            for i in range(min(len(sc), 5)):
+                print("  ", human(UInt64(Int(sc[i][2]))), "  ", sc[i][1], "B/thread  ", String(sc[i][0][byte=: min(sc[i][0].byte_length(), 70)]))
+            var gap = Int(held_beyond) - Int(sc[0][2])
+            print("   largest", human(UInt64(Int(sc[0][2]))), " held beyond live blocks", human(held_beyond), " ", ("unexplained " + human(UInt64(gap))) if gap >= 0 else ("scratch exceeds held by " + human(UInt64(-gap))))
         var names: List[String] = ["PEAK (live at peak)", "HOTSPOTS (allocations)", "TEMPORARIES (alloc then free)"]
         for s in range(3):
             print(names[s])

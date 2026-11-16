@@ -649,12 +649,22 @@ else
   queue=(); command -v gpu-wait >/dev/null && queue=(gpu-wait run --priority 90 --vram 1 --timeout 120 --label heaptide-tests --)
   GPU_BARE_ALLOW=1 timeout 120 /opt/rocm/bin/hipcc -g --offload-arch="$arch" -o build/hip_leak tests/hip_leak.hip 2> "$w/hipcc.err" ||
     bad hipcc "build failed, ROCM_PATH=${ROCM_PATH:-unset} ($w/hipcc.err)"  # set -e would end the suite with no summary
+  GPU_BARE_ALLOW=1 timeout 120 /opt/rocm/bin/hipcc -g --offload-arch="$arch" -o build/hip_scratch tests/hip_scratch.hip 2> "$w/hipcc2.err" ||
+    bad hipcc_scratch "build failed ($w/hipcc2.err)"
+  # the oracle: the same kernel as a device-only code object, read by llvm-readobj
+  GPU_BARE_ALLOW=1 timeout 120 /opt/rocm/bin/hipcc --offload-arch="$arch" --offload-device-only --no-gpu-bundle-output -c -o build/hip_scratch.co tests/hip_scratch.hip 2>> "$w/hipcc2.err" || true
   GPU_BARE_ALLOW=1 timeout 300 "$mojo" build -g --target-accelerator "$arch" tests/mojo_leak.mojo -o build/mojo_leak 2>/dev/null || true
-  "${queue[@]}" bash -c "cd '$here' && ./heaptide run --out $w/hip_leak -- build/hip_leak 2> $w/hip_leak.err; ./heaptide run --gpu --out $w/mojo_leak -- build/mojo_leak 2> $w/mojo_leak.err; ./heaptide run --gpu-timeline all --out $w/hip_leak_tl -- build/hip_leak 2> $w/hip_leak_tl.err" >/dev/null 2>&1 || true
-  for t in hip_leak mojo_leak hip_leak_tl; do ./build/heaptide_report "$w/$t" --top 5 > "$w/$t.txt" 2>&1 || true; done
+  "${queue[@]}" bash -c "cd '$here' && ./heaptide run --out $w/hip_leak -- build/hip_leak 2> $w/hip_leak.err; ./heaptide run --gpu --out $w/mojo_leak -- build/mojo_leak 2> $w/mojo_leak.err; ./heaptide run --gpu-timeline all --out $w/hip_leak_tl -- build/hip_leak 2> $w/hip_leak_tl.err; ./heaptide run --gpu-timeline all --out $w/hip_scratch -- build/hip_scratch 2> $w/hip_scratch.err" >/dev/null 2>&1 || true
+  for t in hip_leak mojo_leak hip_leak_tl hip_scratch; do ./build/heaptide_report "$w/$t" --top 5 > "$w/$t.txt" 2>&1 || true; done
   expect hip_leak live_gpu "$(sum hip_leak live_gpu)" 5242880
   has hip_leak "hip_leak.hip:4"
   has hip_leak_tl "GPU TIMELINE"
+  # GPU SCRATCH: the report's private bytes per thread of the kernel equal llvm-readobj's on the code object; --kernels drops a kernel the trace never dispatched
+  priv=$(/opt/rocm/llvm/bin/llvm-readobj --notes build/hip_scratch.co 2>/dev/null | awk '/private_segment_fixed_size/ && $2 > 0 {print $2; exit}')
+  has hip_scratch "GPU SCRATCH"
+  expect hip_scratch private "$(./build/heaptide_report "$w/hip_scratch" --json 2>/dev/null | grep -oE '"kernel":"_Z3scrPii","private":[0-9]+' | cut -d: -f3 || true)" "${priv:-none}"
+  printf '"Kernel_Name"\n"other"\n' > "$w/k.csv"
+  expect hip_scratch_filter rows "$(./build/heaptide_report "$w/hip_scratch" --kernels "$w/k.csv" 2>/dev/null | grep -c 'B/thread' || true)" 0
   expect mojo_leak live_gpu "$(grep -oE "live_gpu=[1-9][0-9]*" "$w/mojo_leak.err" | cut -d= -f2 || true)" 4194304
   has mojo_leak "mojo_leak.mojo:8"
 fi

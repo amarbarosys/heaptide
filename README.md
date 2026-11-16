@@ -20,7 +20,7 @@ heaptide attach PID [--out DIR]                        a running process, no res
 heaptide detach DIR                                    a last snapshot, then the process runs on untracked
 heaptide flame DIR [-o OUT.html] [--open]              every call path as an interactive flame graph, one offline page
 heaptide report DIR [--json] [--top N] [--per N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none]
-                    [--growth-limit MIB] [--folded leaked|live|peak|allocated|temporaries]
+                    [--growth-limit MIB] [--folded leaked|live|peak|allocated|temporaries] [--kernels KERNEL_TRACE.csv]
 ```
 
 ## One report answers five questions
@@ -317,11 +317,26 @@ Claude Code: `~/.claude/skills/heaptide` or a project's `.claude/skills/heaptide
   Without llvm-symbolizer, frames are `[module+offset]`, which moves with every build: `diff` warns
   and is then only meaningful between identical binaries. It fails (exit 1) on NEW by default, on NEW or GROWN with `--fail-on grown`: a CI gate. Only the
   sites a report shows are compared (every leak, the top N peaks): raise `--top` to widen it.
+- Mojo programs: a GPU or host block's site names the Mojo function that made it, with or without debug info. The report asks
+  `llvm-symbolizer --inlines` and shows the outermost frame that sits in your own source file, and the helpers inlined into it
+  as `(inlined: ...)`. A build without `-g` carries function names but no lines (`__init__.mojo:0:0`), so the site is the function
+  alone (`gpu_alloc_pixel_buffers`); with `mojo build -g1` it also has the line (`scene.mojo:1719:25 (inlined: dev_buf dev_buf.mojo:9:44)`).
+  Gonzales bathroom, the 7 largest GPU blocks: before, `libKGENCompilerRTShared <- main`; now each block names its call site, e.g.
+  the 2.75 GB pixel buffer at `scene.mojo:1719`, no size matching. `-g1` makes the executable 207 MB instead of 76 MB.
 - `--gpu-timeline` (off by default) draws VRAM per site over the run: `sites`, `streams`
   (`hipMallocAsync` split by stream) and `frag` (device memory in use beyond the live blocks:
   pooling, alignment, fragments, from `hipMemGetInfo` against its value before the first
   allocation, so another process allocating on the same GPU shows up there too; plus the async
   pool's reserved-but-unused bytes). `all` turns on the three.
+- A run with a GPU timeline also prints **GPU SCRATCH**: the AMDGPU code objects embedded in the program (ELF machine 224,
+  read with `llvm-readobj --notes`, so LLVM must be installed) as `kernel | private bytes per thread | bytes one queue
+  reserves`. ROCr sizes a queue's scratch by its *largest* kernel (alignment, slots and source in `docs/scratch.md`), so the first
+  row is the figure to hold against "device: held beyond live blocks"; the line below the table prints both and the
+  difference (`--json`: `gpu_scratch`). A program carries kernels it never launches (Gonzales: every integrator), which makes the
+  first row an upper bound: pass `--kernels FILE`, a `rocprofv3 --kernel-trace -f csv` file of the same program, to keep only the
+  dispatched kernels. Measured on the Gonzales bathroom (PT): largest dispatched kernel 2,651,848,704 B = 26,976 x 98,304, the
+  size of the largest scratch allocation `rocprofv3 --scratch-memory-trace` saw, and 77.8 MiB short of the 2.5457 GiB held. Inside a
+  `gpu-wait` job call ROCm tools by full path (`/opt/rocm/bin/rocprofv3`): `/opt/rocm/bin` is not on the job's PATH.
 - An ASan build works when ASan's runtime is shared (gcc's default, clang `-shared-libsan`): both
   run, heaptide sees every block. clang's default links ASan into the program, whose own `malloc`
   then wins over any preload: heaptide warns and sees nothing.
