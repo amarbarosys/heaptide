@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Heaptide
+Exec=heaptide --gui
+Icon=heaptide
+StartupWMClass=heaptide
+Categories=Development;
