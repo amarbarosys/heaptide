@@ -3,7 +3,7 @@
 # Copyright 2026 AMARBARO · amarbaro.org labs
 # heaptide run [--gpu] [--py] [--py-depth N] [--every MS] [--snapshot-every S] [--gpu-timeline all|sites,streams,frag]
 #              [--no-children | --only NAME[,NAME]] [--out DIR] -- CMD...
-# heaptide report DIR [args]  (--supp FILE, --no-default-supp: report/default.supp drops the ROCm runtime's one-time allocations)   |   heaptide snapshot DIR [--label NAME] (every running process writes a report now; NAME keeps them in DIR/NAME)
+# heaptide report DIR [args]  (--supp FILE, --no-default-supp: report/default.supp drops the ROCm runtime's one-time allocations; --kernels TRACE.csv: GPU SCRATCH lists only the kernels a rocprofv3 trace dispatched; a GPU timeline prints GPU SCRATCH, the AMD scratch behind "held beyond live blocks", docs/scratch.md; Mojo sites name the function, -g1 adds file:line)   |   heaptide snapshot DIR [--label NAME] (every running process writes a report now; NAME keeps them in DIR/NAME)
 # heaptide attach PID [--out DIR]   (a running process: gdb loads heaptide into it; root under Yama 1)
 # heaptide detach DIR   (a last snapshot, then the process runs on untracked: no restart)
 # heaptide flame DIR [-o OUT.html] [--open]   (an interactive flame graph, one offline HTML file)

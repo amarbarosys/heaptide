@@ -32,6 +32,7 @@ script). Set `HEAPTIDE=` to point elsewhere. Full flag list: [docs/api.md](../..
 | "memory keeps growing" (no leak shown) | a longer steady run, then `held` chains; for a service, two snapshots + `diff` | [triage](references/triage.md) § growth |
 | "who holds this memory?" | `held` (native) and `py_held` (`--py`, Python names) | [json](references/json.md) |
 | "VRAM is not given back" | `--gpu --gpu-timeline all` | [runtimes](references/runtimes.md) § GPU |
+| "VRAM held beyond live blocks" (AMD) | the `GPU SCRATCH` block of the report; add `--kernels` with a `rocprofv3 --kernel-trace -f csv` of the same run to keep the dispatched kernels | [scratch](../../docs/scratch.md) |
 | a Python job | `--py`, add `--py-depth 4` for shared helpers | [runtimes](references/runtimes.md) § Python |
 | a running process, no restart | `attach` / `snapshot` / `detach` | [runtimes](references/runtimes.md) § attach |
 | "gate this PR on leaks" | two runs + `heaptide diff --fail-on new` | [ci](references/ci.md) |

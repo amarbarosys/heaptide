@@ -75,6 +75,7 @@ a killed process, `report` writes its `.bin` first.
 | `--no-default-supp` | also list the ROCm runtime's one-time allocations that `report/default.supp` drops |
 | `--fail-on W` | what sets exit 1: `any` (default), `leaks`, `growth`, `none` |
 | `--growth-limit MIB` | fail GROWTH on a projected rise above MIB, whatever the mean (MIB > 0) |
+| `--kernels FILE` | a `rocprofv3 --kernel-trace -f csv` file of the same program: `GPU SCRATCH` (`gpu_scratch` in `--json`) lists only the kernels it dispatched |
 | `--folded M` | print `frame;frame;... bytes` lines for one metric, for speedscope, `flamegraph.pl` or inferno |
 
 - Exit code: 0 clean, 1 a leak or growth as `--fail-on` says, 2 tool error (no `.bin`, damaged
