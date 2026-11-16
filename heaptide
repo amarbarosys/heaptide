@@ -22,7 +22,15 @@ recover() {
   done
 }
 case "${1:-}" in
-  report) shift; [[ -d ${1:-} ]] && recover "$1"; HEAPTIDE_DEFAULT_SUPP=${HEAPTIDE_DEFAULT_SUPP:-$here/report/default.supp} exec "$here/build/heaptide_report" "$@" ;;
+  report) shift; [[ -d ${1:-} ]] && recover "$1"; HEAPTIDE_DEFAULT_SUPP=${HEAPTIDE_DEFAULT_SUPP:-$here/report/default.supp}
+    if [[ " $* " == *" --gui "* ]]; then  # --gui: the same report text, saved in DIR and shown in a window (build/heaptide_gui)
+      args=(); for a in "$@"; do [[ $a == --gui ]] || args+=("$a"); done
+      txt=$1/gui-report.txt; rc=0; "$here/build/heaptide_report" "${args[@]}" > "$txt" || rc=$?
+      if command -v gpu-wait >/dev/null; then gpu-wait run --timeout 3600 -- env PATH="$PATH" HOME="$HOME" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DISPLAY="${DISPLAY:-}" "$here/build/heaptide_gui" "$txt" || true
+      else "$here/build/heaptide_gui" "$txt" || true; fi
+      exit $rc
+    fi
+    exec "$here/build/heaptide_report" "$@" ;;
   snapshot) [[ -d ${2:-} && ( -z ${3:-} || ( $3 == --label && ${4:-} =~ ^[A-Za-z0-9._-]+$ ) ) ]] ||
               { echo "FAIL heaptide: snapshot DIR [--label NAME]   (DIR: the run's --out; NAME: letters, digits, . _ -)" >&2; exit 2; }
             # every traced process answers the new mtime; this returns once the root's report (any, if the

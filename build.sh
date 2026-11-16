@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 AMARBARO · amarbaro.org labs
-# Builds build/libheaptide.so (C shim) and build/heaptide_report (Mojo).
+# Builds build/libheaptide.so (C shim), build/heaptide_report (Mojo) and build/heaptide_gui (the --gui window, imkit).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); mkdir -p "$here/build"
 cc -O2 -g -Wall -Wextra -fPIC -shared -fvisibility=hidden -o "$here/build/libheaptide.so" "$here/shim/heaptide.c" -lunwind -ldl -lpthread \
@@ -17,3 +17,11 @@ grep -vE "posix_spawn|Crashpad|spawn_subprocess|Please submit|Stack dump|Program
 (( rc == 0 )) && [[ -x $tmp ]] || { echo "FAIL build: heaptide_report (mojo exit $rc)" >&2; exit 1; }
 mv "$tmp" "$here/build/heaptide_report"
 echo "built $here/build/heaptide_report"
+# the --gui window: imkit from the sibling checkout (IMKIT= overrides)
+imkit=${IMKIT:-$here/../../mojo/mojo-imkit}
+tmp=$here/build/.heaptide_gui.new; rm -f "$tmp"; rc=0
+log=$("$mojo" build -I "$imkit/src" "$here/report/gui.mojo" -o "$tmp" 2>&1) || rc=$?
+grep -vE "posix_spawn|Crashpad|spawn_subprocess|Please submit|Stack dump|Program arguments|^ *#|^[0-9]+ +[^ ]+ +0x|^\s*$" <<<"$log" >&2 || true
+(( rc == 0 )) && [[ -x $tmp ]] || { echo "FAIL build: heaptide_gui (mojo exit $rc)" >&2; exit 1; }
+mv "$tmp" "$here/build/heaptide_gui"
+echo "built $here/build/heaptide_gui"
