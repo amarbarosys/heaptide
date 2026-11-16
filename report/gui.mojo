@@ -33,7 +33,7 @@ def main() raises:
     u.set_theme(amarbaro())
     var ctx = DeviceContext()
     var layer = Layer(ctx, u)
-    var win = Window("heaptide " + path, UW, UH, UW, UH)
+    var win = Window("heaptide " + path, UW, UH, UW, UH, app_id="heaptide")
     var bg = List[UInt32](length=UW * UH, fill=u.theme.panel)
     var title = String("heaptide report")
     var shown = Int((FH - TOP - 16.0) / LINE)  # lines that fit the panel
