@@ -5,3 +5,6 @@
 # leak that merely ends in the same libc call (a user's setenv() is not rocprofiler-register's).
 rocr::AMD::AqlQueue::AqlQueue
 __add_to_environ <- rocprofiler_register::
+# HIP device setup and HSA init, once per process: their signals (72 B each), the event behind one (48 B), the device record
+hsa_amd_signal_create <- rocr::core::Runtime::Load
+amd::roc::Device::create <- amd::roc::Device::init

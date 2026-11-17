@@ -256,8 +256,9 @@ Claude Code: `~/.claude/skills/heaptide` or a project's `.claude/skills/heaptide
 ## Where it is wrong
 
 - A pointer into a block's middle keeps it alive, as in LeakSanitizer, so a stray word that
-  happens to fall inside a leaked block hides it. Runtime residue left: 216 B direct and 48 B
-  indirect from the HIP runtime, 1.2 KiB indirect from Mojo's. The ~170 KiB CPython used to show
+  happens to fall inside a leaked block hides it. The HIP runtime's one-time setup (216 B direct, 48 B
+  indirect, and 376 B under Mojo) is in the default suppression list; a leaked Mojo GPU buffer also
+  shows its HIP bookkeeping as 792 B indirect, which goes when the buffer is freed. The ~170 KiB CPython used to show
   at exit was reached through interior pointers (an object pointer sits past its GC header) and
   is gone.
 - GPU and pinned host blocks are never scanned for pointers, because the HIP runtime's own
