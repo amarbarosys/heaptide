@@ -6,7 +6,7 @@
 static void own(int s) { (void)s; _exit(9); }
 static void scrub(void) { volatile char b[8192]; memset((char *)b, 0, sizeof b); }  // no stale copy below main
 static int deep(int n) { volatile char b[4096]; b[0] = n; return deep(n + 1) + b[0]; }  // overflows
-static void *overflow(void *a) { free(malloc(16)); return (void *)(long)deep(a != 0); }  // allocates first, as threads do
+static void *overflow(void *a) { return (void *)(long)deep(a != 0); }  // never allocates: its signal stack comes at thread start
 int main(int argc, char **argv) {
   void *volatile p = malloc(4096); p = 0;  // lost
   scrub();

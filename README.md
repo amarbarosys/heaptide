@@ -266,8 +266,8 @@ Claude Code: `~/.claude/skills/heaptide` or a project's `.claude/skills/heaptide
   `mprotect` call; `mprotect(PROT_NONE)` decommits. After `madvise(MADV_DONTNEED|MADV_FREE)`
   only the pages resident at report time count. A reservation moved with `mremap` is followed.
 - After SIGKILL or the OOM killer the report has no leak scan (see above); `--snapshot-every` still
-  gives full snapshots before the end. A stack overflow writes a report only in the main thread or a thread that has
-  allocated (each gets a 64 KiB signal stack, mapped but untouched until a crash).
+  gives full snapshots before the end. A stack overflow writes a report in any thread: each gets a 64 KiB
+  signal stack when it starts (mapped but untouched until a crash).
 - A forked child treats the parent's blocks as reachable roots, so it reports only its own leaks
   (LeakSanitizer reports the parent's again in the child). Stack ids are a 64-bit hash plus a
   32-bit check: two sites merge only if all 96 bits collide.

@@ -381,6 +381,25 @@ static void *next(const char *name) {
   return r_dlsym ? r_dlsym(scope, name) : 0;
 }
 
+// A new thread takes its signal stack before its own code runs: a thread that never allocates
+// still gets a report when it overflows its stack.
+static void *thread_start(void *v) {
+  void *(*f)(void *) = ((void **)v)[0], *a = ((void **)v)[1];
+  r_free(v);
+  if (my_slot < 0) new_thread();
+  return f(a);
+}
+HOOK int pthread_create(pthread_t *t, const pthread_attr_t *at, void *(*f)(void *), void *a) {
+  static int (*real)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+  if (!real) real = next("pthread_create");
+  void **p = ready && !guard && r_malloc ? r_malloc(2 * sizeof *p) : 0;
+  if (!p) return real(t, at, f, a);
+  p[0] = (void *)f, p[1] = a;
+  int e = real(t, at, thread_start, p);
+  if (e) r_free(p);
+  return e;
+}
+
 // Other libraries' constructors can allocate before ours runs: resolve on first use, and serve
 // only the allocations made while resolving (dlsym's own calloc) from the static buffer.
 static int resolving;
@@ -844,7 +863,7 @@ static int root_cb(struct dl_phdr_info *in, size_t sz, void *self) {
 // definitions come from our handle (a plain &malloc here would bind to libc's, first in scope).
 static const char *hooked[] = {"malloc", "calloc", "free", "realloc", "reallocarray", "posix_memalign", "aligned_alloc",
   "memalign", "valloc", "mmap", "mmap64", "munmap", "mprotect", "madvise", "mremap", "hipMalloc", "hipMallocAsync",
-  "hipHostMalloc", "hipFree", "hipHostFree", "hipFreeAsync"};
+  "hipHostMalloc", "hipFree", "hipHostFree", "hipFreeAsync", "pthread_create"};
 static void *own[sizeof hooked / sizeof *hooked];
 static uint64_t (*pre)[2];  // writable anonymous memory at attach: may hold the only pointer to a new block
 static int npre;
