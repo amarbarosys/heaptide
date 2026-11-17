@@ -660,7 +660,8 @@ else
   has hip_leak "hip_leak.hip:4"
   has hip_leak_tl "GPU TIMELINE"
   # GPU SCRATCH: the report's private bytes per thread of the kernel equal llvm-readobj's on the code object; --kernels drops a kernel the trace never dispatched
-  priv=$(/opt/rocm/llvm/bin/llvm-readobj --notes build/hip_scratch.co 2>/dev/null | awk '/private_segment_fixed_size/ && $2 > 0 {print $2; exit}')
+  ro=$(command -v llvm-readobj || echo /opt/rocm/llvm/bin/llvm-readobj)  # ROCm 7+ keeps it in /opt/rocm/lib/llvm/bin
+  priv=$("$ro" --notes build/hip_scratch.co 2>/dev/null | awk '/private_segment_fixed_size/ && $2 > 0 {print $2; exit}')
   has hip_scratch "GPU SCRATCH"
   expect hip_scratch private "$(./build/heaptide_report "$w/hip_scratch" --json 2>/dev/null | grep -oE '"kernel":"_Z3scrPii","private":[0-9]+' | cut -d: -f3 || true)" "${priv:-none}"
   printf '"Kernel_Name"\n"other"\n' > "$w/k.csv"
