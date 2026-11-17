@@ -45,7 +45,7 @@ def main() raises:
         off = max(0, min(off - Int(inp.wheel * 3.0), max(0, len(lines) - shown)))
         u.begin(inp)
         u.panel(16, 16, FW - 16, FH - 16, title)
-        u.clip(16, 16, FW - 16, FH - 16)
+        u.clip(16, 16, FW - 24, FH - 16)  # long lines stop 8 px inside the border, not on it
         for i in range(min(shown, len(lines) - off)):
             var k = off + i
             _ = u.text(32, TOP + LINE * Float32(i), lines[k], 0, u.theme.accent if heads[k] else u.theme.text)
