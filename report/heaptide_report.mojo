@@ -255,8 +255,11 @@ def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], 
     var p_lo = List[UInt64]()  # CPython's perf map (-X perf): one stub range per Python function
     var p_hi = List[UInt64]()
     var p_name = List[String]()
+    var pmap = dir + "/perf." + pid + ".map"  # the shim's copy; else the live one (a report dir from before v1.3.0)
+    if not exists(pmap):
+        pmap = "/tmp/perf-" + pid + ".map"
     try:
-        with open("/tmp/perf-" + pid + ".map", "r") as f:
+        with open(pmap, "r") as f:
             var text = f.read()
             for l in text.split("\n"):
                 var f3 = l.split(" ", 2)

@@ -22,6 +22,7 @@
 #include <sys/auxv.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#include <sys/sendfile.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
@@ -1474,6 +1475,16 @@ static void py_dump(pid_t pid) {
     dprintf(fd, "  %ld B in %ld blocks  %s\n", (long)py_rows[top[i]].bytes, (long)py_rows[top[i]].blocks, py_names + py_rows[top[i]].name);
   close(fd);
   rename(tmp, path);
+  // -X perf's map names native frames as Python functions: a copy beside the report reads on any machine
+  snprintf(path, sizeof path, "/tmp/perf-%d.map", pid);
+  int in = open(path, O_RDONLY);
+  snprintf(path, sizeof path, "%s/perf.%d.map", outdir, pid);
+  if (in >= 0 && (fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644)) >= 0) {
+    while (sendfile(fd, in, 0, 1 << 30) > 0) {}
+    close(fd);
+    rename(tmp, path);
+  }
+  if (in >= 0) close(in);
 }
 HOOK void heaptide_py_dump(void) { py_dump(getpid()); }
 // --py holder chains (py/run.py held): which Python object holds the top sites' memory, in Python names.

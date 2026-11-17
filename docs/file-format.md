@@ -6,7 +6,7 @@ The shim writes one file per process into `HEAPTIDE_OUT` (default `.work/heaptid
 
 Files from before v0.1.3 keep the maps in a separate `heaptide.<pid>.maps`; the report still reads them.
 
-With `--py`, `py.<pid>.txt` adds the PYTHON section as text.
+With `--py`, `py.<pid>.txt` adds the PYTHON section as text, and `perf.<pid>.map` is a copy of CPython's `/tmp/perf-<pid>.map` (`-X perf`), so the report names `py::` frames on another machine.
 
 ## `heaptide.<pid>.bin`
 

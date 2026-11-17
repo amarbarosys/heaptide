@@ -282,7 +282,7 @@ Claude Code: `~/.claude/skills/heaptide` or a project's `.claude/skills/heaptide
 - Under `--py` with Python 3.12 or newer, native and GPU sites name the Python function that
   made them (`... <- ffi_call_int <- py::load_weights train.py`): heaptide starts Python with
   `-X perf`, whose per-function stubs are ordinary native frames, and names them from
-  `/tmp/perf-<pid>.map` (so the report must run on the same machine). Function names only: the
+  `/tmp/perf-<pid>.map`, copied into the report dir as `perf.<pid>.map` (the report reads on any machine). Function names only: the
   PYTHON section keeps the line numbers. A HIP library loaded `RTLD_LOCAL` (ctypes) is tracked too.
 - Private writable memfd mappings (Qt's JavaScript heap, other VM and JIT heaps) are scanned as
   roots. Before v0.1.5 a QML program holding 2,000 strings showed 968,572 B of false leaks in a
@@ -320,9 +320,9 @@ Claude Code: `~/.claude/skills/heaptide` or a project's `.claude/skills/heaptide
 - `heaptide diff BASE NEW` compares two report dirs site by site, matched by their function chain
   without line numbers (a change that only moves code keeps its sites): NEW leak sites, GROWN
   (direct or peak up by more than 64 KiB and 10%, a new big peak site included), GONE, SHRUNK.
-  Without llvm-symbolizer, frames are `[module+offset]`, which moves with every build: `diff` warns
+  Without llvm-symbolizer the report names frames through GNU `addr2line` (`report/addr2sym.sh`); with neither, frames are `[module+offset]`, which moves with every build: `diff` warns
   and is then only meaningful between identical binaries. It fails (exit 1) on NEW by default, on NEW or GROWN with `--fail-on grown`: a CI gate. Only the
-  sites a report shows are compared (every leak, the top N peaks): raise `--top` to widen it.
+  sites compared are every leak and every site whose peak passed 64 KiB, whatever `--top` is.
 - Mojo programs: a GPU or host block's site names the Mojo function that made it, with or without debug info. The report asks
   `llvm-symbolizer --inlines` and shows the outermost frame that sits in your own source file, and the helpers inlined into it
   as `(inlined: ...)`. A build without `-g` carries function names but no lines (`__init__.mojo:0:0`), so the site is the function

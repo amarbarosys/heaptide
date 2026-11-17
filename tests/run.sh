@@ -588,6 +588,9 @@ if python3 -c "import numpy" 2>/dev/null; then
   grep -qE "cpu  .*<- py::leak_in_native py_mixed.py" "$w/py_mixed.txt" && ok "py_mixed native site names py::leak_in_native" || bad py_mixed "no py frame on a cpu site ($w/py_mixed.txt)"
   ./build/heaptide_report "$w/py_mixed" --flame-data > "$w/py_mixed.flame.json" 2>/dev/null || true
   node tests/flame_check.mjs report/flame.html "$w/py_mixed.flame.json" py::leak_in_native > "$w/py_mixed.flame.txt" 2>&1 && ok "flame views keep totals, py:: frames (py_mixed)" || bad flame "$(grep -m1 FAIL "$w/py_mixed.flame.txt" || echo 'node failed') ($w/py_mixed.flame.txt)"
+  # the perf map is copied beside the report: py:: frames survive the live map's removal (another machine)
+  for m in "$w"/py_mixed/perf.*.map; do [[ -s $m ]] && rm -f "/tmp/perf-${m##*/perf.}"; done
+  ./build/heaptide_report "$w/py_mixed" --fail-on none 2>/dev/null | grep -qE "cpu  .*<- py::leak_in_native" && ok "py_mixed names py:: from the copied perf map" || bad py_mixed "no py frame without /tmp/perf map"
   run py_gpu --py -- python3 tests/py_gpu.py "$here/build/tl/libamdhip64.so"
   expect py_gpu live_gpu "$(sum py_gpu live_gpu)" 1048576
   grep -qE "gpu  .*<- py::load_weights py_gpu.py" "$w/py_gpu.txt" && ok "py_gpu GPU site names py::load_weights" || bad py_gpu "no py frame on a gpu site ($w/py_gpu.txt)"
