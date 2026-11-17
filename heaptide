@@ -26,7 +26,7 @@ case "${1:-}" in
     if [[ " $* " == *" --gui "* ]]; then  # --gui: the same report text, saved in DIR and shown in a window (build/heaptide_gui)
       args=(); for a in "$@"; do [[ $a == --gui ]] || args+=("$a"); done
       txt=$1/gui-report.txt; rc=0; "$here/build/heaptide_report" "${args[@]}" > "$txt" || rc=$?
-      if command -v gpu-wait >/dev/null; then gpu-wait run --timeout 3600 -- env PATH="$PATH" HOME="$HOME" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DISPLAY="${DISPLAY:-}" "$here/build/heaptide_gui" "$txt" || true
+      if command -v gpu-wait >/dev/null; then gpu-wait run --timeout 3600 -- env -u HSA_OVERRIDE_GFX_VERSION PATH="$PATH" HOME="$HOME" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" DISPLAY="${DISPLAY:-}" "$here/build/heaptide_gui" "$txt" || true
       else "$here/build/heaptide_gui" "$txt" || true; fi
       exit $rc
     fi
