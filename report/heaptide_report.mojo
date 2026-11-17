@@ -384,7 +384,7 @@ def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], 
             root_names.append(String("global ", func, " (", mods[qi], ")") if not func.startswith("[") else func)
             continue
         # user frame: own source file, or (no debug info) a frame in the program's own executable
-        var user = (user_file(String(loc[byte=: loc.find(":")])) if loc.find(":") > 0 else False) or (loc.startswith("??") and mods[qi] == exe and not exe.startswith("python")) or (loc.endswith(":0:0") and mods[qi] == exe and not (func.startswith("std::") or func.startswith("max::"))) or (pys[qi].byte_length() > 0 and not func.startswith("[jit "))  # a static python: its frames are the interpreter
+        var user = (user_file(String(loc[byte=: loc.find(":")])) if loc.find(":") > 0 else False) or (loc.startswith("??") and mods[qi] == exe and not exe.startswith("python")) or (loc.endswith(":0:0") and mods[qi] == exe and not exe.startswith("python") and not (func.startswith("std::") or func.startswith("max::"))) or (pys[qi].byte_length() > 0 and not func.startswith("[jit "))  # a static python: its frames are the interpreter
         answers.append(Frame(func^, loc^, user, True, inl^))
     var frames = List[Frame]()
     for a in at:
