@@ -7,13 +7,15 @@
 # Exit 0 clean, 1 leak or growth (per --fail-on), 2 tool error.
 from std.sys import argv, exit, stderr
 from std.os import listdir, getenv
+from std.os.path import exists
 from std.ffi import external_call
 
 comptime ROW = 56
-# $HEAPTIDE_SYMBOLIZER, else llvm-symbolizer on PATH, else ROCm's copy; exit 3 when none runs
+# $HEAPTIDE_SYMBOLIZER, else llvm-symbolizer on PATH, else ROCm's copy, else addr2line through $A (report/addr2sym.sh);
+# exit 3 when none runs
 # env -u DEBUGINFOD_URLS: the DEBUGINFOD step below already fetched what the server has (and remembers what it has not for 7
 # days); with the variable set llvm-symbolizer asked the server again for every module without debug info on every run (90 s)
-comptime FIND_SYMBOLIZER = "S=${HEAPTIDE_SYMBOLIZER:-$(command -v llvm-symbolizer || echo /opt/rocm/llvm/bin/llvm-symbolizer)}; [ -x \"$S\" ] || exit 3; env -u DEBUGINFOD_URLS \"$S\""
+comptime FIND_SYMBOLIZER = "R=/opt/rocm/llvm/bin/llvm-symbolizer; S=${HEAPTIDE_SYMBOLIZER:-$(command -v llvm-symbolizer || { [ -x $R ] && echo $R; } || { command -v addr2line > /dev/null && echo \"$A\"; })}; [ -x \"$S\" ] || exit 3; env -u DEBUGINFOD_URLS \"$S\""
 # Stripped modules: swap in the debug file from elfutils' cache (shared with gdb), fetched by
 # build-id from $DEBUGINFOD_URLS when missing. Reads the request file $I in place.
 comptime DEBUGINFOD = """c=${XDG_CACHE_HOME:-$HOME/.cache}/debuginfod_client
@@ -326,7 +328,8 @@ def resolve_frames(ips: List[UInt64], roots: List[UInt64], maps: List[Mapping], 
     var outp = dir + "/.sym." + pid + ".out"
     with open(inp, "w") as f:
         f.write(req)
-    var cmd = String("I=", sq(inp), "\n", DEBUGINFOD, FIND_SYMBOLIZER, " --inlines < ", sq(inp), " > ", sq(outp), "\0")
+    var me = String(argv()[0])
+    var cmd = String("I=", sq(inp), "\nA=", sq(String(me[byte=: me.rfind("/") + 1], "../report/addr2sym.sh")), "\n", DEBUGINFOD, FIND_SYMBOLIZER, " --inlines < ", sq(inp), " > ", sq(outp), "\0")
     var rc = external_call["system", Int32](cmd.unsafe_ptr())
     var text = String()
     if rc == 3 << 8:  # no symbolizer: sites name modules only
@@ -1061,6 +1064,10 @@ def main() raises:
                 if not seen[w]:
                     seen[w] = True
                     wanted.append(w)
+        if sites_out.byte_length() > 0:  # diff: every site whose peak can be GROWN (> 64 KiB up), not only the top N
+            for s in range(len(stacks)):
+                if not seen[s] and stacks[s].peak_b > 65536:
+                    wanted.append(s)
         var held = List[UInt64]()
         if has_held:
             for s in range(n):

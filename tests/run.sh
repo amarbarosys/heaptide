@@ -444,6 +444,12 @@ expect diff none_exit "$rc" 0
 for x in "--fail-on" "--fail-on bad" "--top" "--bogus"; do rc=0; ./heaptide diff "$w/c_diff" "$w/c_diff_b" $x >/dev/null 2>&1 || rc=$?; expect diff "bad_args[$x]" "$rc" 2; done
 HEAPTIDE_SYMBOLIZER=/nonexistent ./heaptide diff "$w/c_diff" "$w/c_diff_b" 2> "$w/diff_nosym.err" >/dev/null || true
 grep -q "warning: unnamed frames" "$w/diff_nosym.err" && ok "diff warns without names" || bad diff "no warning without llvm-symbolizer ($w/diff_nosym.err)"
+# no LLVM: addr2line names the frames (report/addr2sym.sh), so diff still matches across builds
+HEAPTIDE_SYMBOLIZER="$PWD/report/addr2sym.sh" ./heaptide diff "$w/c_diff" "$w/c_diff_b" > "$w/diff_a2l.txt" 2>&1 || true
+grep -q "^NEW .*lose_b c_diff.c" "$w/diff_a2l.txt" && ! grep -q "unnamed frames" "$w/diff_a2l.txt" && ok "diff names frames through addr2line" || bad diff "addr2line fallback ($w/diff_a2l.txt)"
+# --top 1 shows one peak, yet diff compares every site above 64 KiB
+./heaptide diff "$w/c_diff" "$w/c_diff_b" --top 1 > "$w/diff_top1.txt" 2>&1 || true
+grep -q "^GROWN .*buffer c_diff.c" "$w/diff_top1.txt" && ok "diff --top 1 keeps GROWN buffer" || bad diff "GROWN lost under --top 1 ($w/diff_top1.txt)"
 expect diff json "$(./heaptide diff "$w/c_diff" "$w/c_diff_b" --json 2>/dev/null | python3 -c 'import json,sys;print(sorted(c["group"] for c in json.load(sys.stdin)["changes"]))' 2>&1 || true)" "['GROWN', 'NEW']"
 # Qt's JavaScript heap lives in memfd mappings: a script's strings must not show as leaked in a
 # snapshot while it holds them (before memfd heaps were roots: 968,572 B direct). Needs Qt 6 qml6.
