@@ -61,6 +61,10 @@ script). Set `HEAPTIDE=` to point elsewhere. Full flag list: [docs/api.md](../..
   PEAK names what it held). If the kill took the wrapper too, `heaptide report DIR` writes it.
 - heaptide does not queue GPU jobs: do not start a second one on a busy GPU.
 - Never attach to a browser in use; attached runs under-report by at most the `before attach:` bytes.
+- A torch server under `--py` (ComfyUI, 2026-11-17): the tables and `/dev/shm` count against a cgroup cap, and a run at `--mem 36` was OOM-killed
+  right after prompt 1 (RssAnon 31.8 GB, 2.0M stacks, 288 MB bin); a higher cap is untested, so size it above the RssAnon peak plus the tables and read the first snapshot. On that run the biggest sites printed as
+  `[python3.13+0xADDR]` although the addresses lie inside mapped `libc10.so` and `libc10_hip` (a small torch toy resolved the same library to
+  `c10::alloc_cpu`), and `py_held` named only module state (under 20 MB): tensor holders were not named. Cause of the unresolved addresses: open.
 
 ## In mojo-baro (standard since 2026-11-15)
 
