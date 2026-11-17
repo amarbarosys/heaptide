@@ -20,7 +20,7 @@ heaptide attach PID [--out DIR]                        a running process, no res
 heaptide detach DIR                                    a last snapshot, then the process runs on untracked
 heaptide flame DIR [-o OUT.html] [--open]              every call path as an interactive flame graph, one offline page
 heaptide report DIR [--json] [--top N] [--per N] [--supp FILE] [--no-default-supp] [--fail-on any|leaks|growth|none]
-                    [--growth-limit MIB] [--folded leaked|live|peak|allocated|temporaries] [--kernels KERNEL_TRACE.csv]
+                    [--growth-limit MIB] [--folded leaked|live|peak|allocated|temporaries] [--kernels KERNEL_TRACE.csv] [--gui]
 ```
 
 ## One report answers five questions
@@ -63,6 +63,11 @@ TEMPORARIES (alloc then free)
 
 A fifth section, **PYTHON**, appears with `--py`: still-allocated memory by Python source line.
 The report exits 1 because there are leaks (`--fail-on` picks what counts).
+
+`--gui` shows the same report in a window, the wheel scrolls. `./build.sh` builds it (`build/heaptide_gui`, imkit) only
+when `mojo-imkit` is checked out next to this repo (`IMKIT=` overrides); the CLI never needs it.
+
+![heaptide report --gui on examples/demo.c](docs/img/gui.png)
 
 ## Every call path at once: `heaptide flame`
 
