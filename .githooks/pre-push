@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
 # A push is an explicit act: PUBLISH_OK=1 must be set by the person pushing. Then the publish gate and the CPU suite.
+# The suite runs once per clean tree: a pass is recorded by tree hash, so pushing main and then its tag runs it once.
+set -euo pipefail
 [ "${PUBLISH_OK:-}" = 1 ] || { echo "refusing push: set PUBLISH_OK=1"; exit 1; }
-cd "$(git rev-parse --show-toplevel)" && tools/publish-check.sh && tests/run.sh --cpu
+cd "$(git rev-parse --show-toplevel)"
+tools/publish-check.sh
+tree=$(git rev-parse HEAD^{tree}) pass="$(git rev-parse --git-dir)/suite-pass"
+if git diff --quiet HEAD && grep -qx "$tree" "$pass" 2>/dev/null; then echo "suite: tree $tree already passed, skipped"; exit 0; fi
+timeout -k 10 1200 tests/run.sh --cpu  # a ceiling: a hang outside run()'s per-test timeout still ends
+git diff --quiet HEAD && echo "$tree" >> "$pass" || true

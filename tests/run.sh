@@ -15,7 +15,9 @@ fails=() n=0
 ok() { n=$((n + 1)); echo "ok   $1"; }
 bad() { n=$((n + 1)); fails+=("$1"); echo "FAIL $1: $2"; }
 expect() { [[ $3 == "$4" ]] && ok "$1 $2=$4" || bad "$1" "$2 got '$3' want '$4' (log $w/$1.*)"; }
-run() { local t=$1; shift; rm -rf "$w/$t"; ./heaptide run --out "$w/$t" "$@" 2> "$w/$t.err" >/dev/null || true
+# TEST_TIMEOUT (60 s) per run: a hang fails that test and the suite goes on (a fork deadlock in
+# c_forkmt once held 9 cores for 19 minutes inside the pre-push hook)
+run() { local t=$1; shift; rm -rf "$w/$t"; timeout -k 5 "${TEST_TIMEOUT:-60}" ./heaptide run --out "$w/$t" "$@" 2> "$w/$t.err" >/dev/null || true
         ./build/heaptide_report "$w/$t" --top 5 > "$w/$t.txt" 2>&1 || true; }
 # value of " KEY=N" in the shim summary line; empty when missing (expect() then fails loudly)
 sum() { grep -m1 -oE " $2=[0-9]+" "$w/$1.err" | cut -d= -f2 || true; }
