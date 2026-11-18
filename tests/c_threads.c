@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 AMARBARO · amarbaro.org labs
 // 3000 short threads, each allocating: their signal stacks must go back at exit.
 #include <pthread.h>
 #include <stdio.h>
