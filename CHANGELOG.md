@@ -2,6 +2,7 @@
 
 Full notes in `docs/releases/`. Newest first.
 
+- [v1.3.1](docs/releases/v1.3.1.md) (2026-11-18): fork no longer hangs a child inside the unwinder; test timeouts
 - [v1.3.0](docs/releases/v1.3.0.md) (2026-11-18): py names on any machine, diff without LLVM and past --top, HIP setup suppressed, thread signal stacks freed
 - [v1.2.0](docs/releases/v1.2.0.md) (2026-11-17): GPU SCRATCH by kernel, Mojo call sites of GPU blocks, python site fix on stripped interpreters
 - [v1.1.0](docs/releases/v1.1.0.md) (2026-11-16): report --gui imkit window, own app icon

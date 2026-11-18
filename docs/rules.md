@@ -17,3 +17,6 @@ Each rule comes from a mistake: what broke -> rule.
 - A suite test hung for 19 minutes with 8 spinning threads and no test timeout -> every `run()` has
   `TEST_TIMEOUT` (60 s) and the hook caps the suite at 20 minutes.
 - A stress run used a guessed `--no-report` flag and exited 2 in 0 s -> read `./heaptide run --help` first.
+- A failed `git commit` left files staged, and the next handed-over commit swept them in (hook and
+  release note in one commit) -> after a failed commit, `git reset -q` before handing over a commit line,
+  and hand over `git add P && git commit P` with the same paths (`git commit P` alone rejects a new file).
