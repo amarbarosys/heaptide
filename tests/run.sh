@@ -26,7 +26,7 @@ waitfor() { local i; for ((i = 0; i < $1 * 20; i++)); do "${@:2}" && return 0; s
 caught() { local p m; p=$(pgrep -nf -- "$1") || return 1; m=$(awk '/^SigCgt/ {print $2}' "/proc/$p/status" 2>/dev/null) || return 1
            (( (16#${m:-0} >> ($2 - 1)) & 1 )); }
 
-for t in c_leak c_reach c_churn c_grow c_flat c_setup c_mmap c_slow c_fork c_interior c_realloc c_peak c_reserve c_signal c_snapshot c_remap c_crash c_steady c_forkmt c_rtsig c_cache c_sleep c_diff c_attach c_binptr; do cc -O0 -g -o "build/$t" "tests/$t.c"; done
+for t in c_leak c_reach c_churn c_grow c_flat c_setup c_mmap c_slow c_fork c_interior c_realloc c_peak c_reserve c_signal c_snapshot c_remap c_crash c_steady c_forkmt c_rtsig c_cache c_sleep c_diff c_attach c_binptr c_threads; do cc -O0 -g -o "build/$t" "tests/$t.c"; done
 
 run c_leak -- build/c_leak
 expect c_leak direct "$(sum c_leak direct)" 100005
@@ -38,6 +38,8 @@ has c_leak "lose c_leak.c:3"
 
 run c_binptr -- build/c_binptr  # glibc's bins point into the 40 B block's tail: still lost
 expect c_binptr direct "$(sum c_binptr direct)" 40
+g=$(./heaptide run --out "$w/c_threads" -- build/c_threads 2> "$w/c_threads.err" | cut -d= -f2)  # 3000 threads: bare +82 MB, signal stacks kept +274 MB
+expect c_threads stacks_freed "$(( ${g:-999999} < 150000 ))" 1
 run c_reach -- build/c_reach
 expect c_reach direct "$(sum c_reach direct)" 128
 expect c_reach indirect "$(sum c_reach indirect)" 256

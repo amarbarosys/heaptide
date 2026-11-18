@@ -95,10 +95,22 @@ static _Atomic uint32_t ngids;
 static uint64_t (*tl)[2], ntl, frag_base = ~0ULL;
 static void *vm(size_t n);
 // A thread's first allocation takes a slot and a signal stack: its stack overflow gets a report.
+// The stack goes back at thread exit (a key destructor): 10k short threads kept 10k mappings.
+static pthread_key_t alt_key;
+static pthread_once_t alt_once = PTHREAD_ONCE_INIT;
+static void alt_free(void *p) {
+  sigaltstack(&(stack_t){.ss_flags = SS_DISABLE}, 0);
+  syscall(SYS_munmap, p, 1 << 16);
+}
+static void alt_init(void) { pthread_key_create(&alt_key, alt_free); }
 static void new_thread(void) {
   my_slot = atomic_fetch_add(&nslot, 1);
   stack_t a;
-  if (!sigaltstack(0, &a) && (a.ss_flags & SS_DISABLE) && (a.ss_sp = vm(1 << 16))) sigaltstack(&(stack_t){a.ss_sp, 0, 1 << 16}, 0);
+  if (!sigaltstack(0, &a) && (a.ss_flags & SS_DISABLE) && (a.ss_sp = vm(1 << 16))) {
+    sigaltstack(&(stack_t){a.ss_sp, 0, 1 << 16}, 0);
+    pthread_once(&alt_once, alt_init);
+    pthread_setspecific(alt_key, a.ss_sp);
+  }
 }
 static void add_live(int kind, int64_t d) {
   if (my_slot < 0) new_thread();

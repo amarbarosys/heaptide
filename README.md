@@ -268,7 +268,7 @@ Claude Code: `~/.claude/skills/heaptide` or a project's `.claude/skills/heaptide
   only the pages resident at report time count. A reservation moved with `mremap` is followed.
 - After SIGKILL or the OOM killer the report has no leak scan (see above); `--snapshot-every` still
   gives full snapshots before the end. A stack overflow writes a report in any thread: each gets a 64 KiB
-  signal stack when it starts (mapped but untouched until a crash).
+  signal stack when it starts (mapped but untouched until a crash), unmapped when it exits.
 - A forked child treats the parent's blocks as reachable roots, so it reports only its own leaks
   (LeakSanitizer reports the parent's again in the child). Stack ids are a 64-bit hash plus a
   32-bit check: two sites merge only if all 96 bits collide.
