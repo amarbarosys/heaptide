@@ -12,3 +12,8 @@ Each rule comes from a mistake: what broke -> rule.
   `PUBLISH_OK=1 git push origin HEAD:main` and `PUBLISH_OK=1 git push origin vX.Y.Z`.
 - A Brain note path was built as `~/Brain/$(brain-repo-dir ...)` and failed: that tool prints an absolute
   path -> use its output as it is, or write to `~/Brain/tools/heaptide/`.
+- `cat >` rewrote `.githooks/pre-push` while a push was running it; bash reads a script by byte offset
+  -> change a script that may be running by writing a copy and `mv` over it (new inode).
+- A suite test hung for 19 minutes with 8 spinning threads and no test timeout -> every `run()` has
+  `TEST_TIMEOUT` (60 s) and the hook caps the suite at 20 minutes.
+- A stress run used a guessed `--no-report` flag and exited 2 in 0 s -> read `./heaptide run --help` first.

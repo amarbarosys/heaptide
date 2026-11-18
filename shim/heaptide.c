@@ -288,7 +288,26 @@ static int unw_ready(void) {
   void *t = 0;
   return unw_ok || !unw_h || (unw_ok = !dlinfo(unw_h, RTLD_DI_TLS_DATA, &t) && t);
 }
+// fork() must not copy a thread that is inside the unwinder: libunwind and the loader take glibc
+// mutexes there, and the child inherits them locked (c_forkmt hung in a futex after a fork). Each
+// capture counts itself on its slot's line; fork_lock raises forking and waits for every line to drain.
+static _Atomic int forking;
+static struct { _Alignas(64) _Atomic int n; } unw_in[256];
+__attribute__((always_inline)) static inline uint32_t stack_raw(int kind);
 __attribute__((always_inline)) static inline uint32_t stack_id(int kind) {  // inlined: one less frame to unwind
+  if (my_slot < 0) new_thread();
+  _Atomic int *n = &unw_in[my_slot & 255].n;
+  for (;;) {
+    atomic_fetch_add(n, 1);
+    if (!atomic_load(&forking)) break;
+    atomic_fetch_sub(n, 1);
+    while (atomic_load_explicit(&forking, memory_order_relaxed)) syscall(SYS_sched_yield);
+  }
+  uint32_t id = stack_raw(kind);
+  atomic_fetch_sub_explicit(n, 1, memory_order_release);
+  return id;
+}
+__attribute__((always_inline)) static inline uint32_t stack_raw(int kind) {
   // no unwind yet: a stackless row of its own, so the exit scan still reads the block as a mapping
   if (kind == MMAP && !unw_ready()) return intern((void *[1]){0}, 0, kind);
 #ifdef HT_NO_UNWIND  // bench only: what the hooks cost without the unwind
@@ -1564,18 +1583,22 @@ static int self_cb(struct dl_phdr_info *in, size_t sz, void *self) {
 // fork() holds every lock across the copy (outer first, as the hooks nest them), so the child
 // never inherits a table another thread was halfway through resizing or shifting.
 static void fork_lock(void) {
+  atomic_store(&forking, 1);  // before the locks: a capture in flight holds a stacks lock (intern)
+  for (int i = 0; i < 256; i++) while (atomic_load(&unw_in[i].n)) syscall(SYS_sched_yield);
   lock(&mm_lk); lock(&peak_lk);
   for (int i = 0; i < SHARDS; i++) lock(&stacks[i].lk), lock(&live[i].lk);
 }
 static void fork_unlock(void) {
   for (int i = 0; i < SHARDS; i++) unlock(&live[i].lk), unlock(&stacks[i].lk);
   unlock(&peak_lk); unlock(&mm_lk);
+  atomic_store(&forking, 0);
 }
 // A forked child inherits the parent's blocks: they are the parent's leaks, not the child's, but
 // may hold the only pointer to a child block. Mark them reachable roots. Other threads are gone:
 // their batched site counts are folded in (else the child's frees drive a site negative) and the
 // sampler restarted.
 static void forked(void) {
+  memset(unw_in, 0, sizeof unw_in);  // a thread caught between its two counts is gone in the child
   fork_unlock();
   is_root = 0;
   if (nochild) done = 1, ready = 0;  // --no-children: not traced from here, no report

@@ -19,11 +19,12 @@ static void *worker(void *a) {
 // 200000 B: above the mmap threshold, so a fresh mapping no dead worker's stack can hold a stale
 // pointer to (with 40 B, glibc on Ubuntu reused a chunk a worker had just freed: reachable)
 __attribute__((noinline)) static void lose_child(void) { void *volatile p = malloc(200000); (void)p; }
-int main(void) {
+int main(int argc, char **argv) {
+  int forks = argc > 1 ? atoi(argv[1]) : 200;  // more forks: a stress run for fork races
   pthread_t th[T];
   for (long t = 0; t < T; t++) { for (int i = 0; i < S; i++) slot[t][i] = malloc(16); pthread_create(&th[t], 0, worker, (void *)t); }
   int bad = 0;
-  for (int i = 0; i < 200; i++) {
+  for (int i = 0; i < forks; i++) {
     pid_t p = fork();
     if (!p) { lose_child(); for (int t = 0; t < T; t++) for (int k = 0; k < S; k++) free(slot[t][k]); exit(0); }
     int st; waitpid(p, &st, 0); bad += !WIFEXITED(st) || WEXITSTATUS(st);
