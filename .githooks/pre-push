@@ -6,6 +6,12 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 tools/publish-check.sh
 tree=$(git rev-parse HEAD^{tree}) pass="$(git rev-parse --git-dir)/suite-pass"
-if git diff --quiet HEAD && grep -qx "$tree" "$pass" 2>/dev/null; then echo "suite: tree $tree already passed, skipped"; exit 0; fi
+# a passed tree that differs from this one only in Markdown counts too (a release note commit)
+if git diff --quiet HEAD && [ -s "$pass" ]; then
+  while read -r p; do
+    [ -z "$(git diff --name-only "$p" "$tree" 2>/dev/null | grep -v '\.md$')" ] && git cat-file -e "$p" 2>/dev/null &&
+      { echo "suite: tree $tree passed (same as $p outside .md), skipped"; exit 0; }
+  done < "$pass"
+fi
 timeout -k 10 1200 tests/run.sh --cpu  # a ceiling: a hang outside run()'s per-test timeout still ends
 git diff --quiet HEAD && echo "$tree" >> "$pass" || true
